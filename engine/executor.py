@@ -23,6 +23,7 @@ from collections import defaultdict, deque
 from typing import Any
 
 from nodes.registry import get_node
+from engine.node_runner import run_node
 
 
 # ── Types ────────────────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ async def execute_workflow(
         resolved_inputs = _resolve_inputs(node, edges, completed, module)
 
         try:
-            outputs = await module.execute(uid, token, resolved_inputs)
+            outputs = await run_node(module, uid, token, resolved_inputs)
         except Exception as exc:
             error_msg = str(exc)
             result.record(node_id, {}, status="error", error=error_msg)

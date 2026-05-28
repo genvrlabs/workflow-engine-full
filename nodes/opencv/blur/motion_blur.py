@@ -1,7 +1,15 @@
 """Motion blur using a directional line kernel."""
+import json
+
 import cv2
 import numpy as np
 from nodes.opencv._utils import load_image_from_url, save_and_upload
+
+_NODE = "opencv.motion_blur"
+
+
+def _debug_console(label: str, data) -> None:
+    print(f"[{_NODE}] {label}:\n{json.dumps(data, default=str, indent=2)}", flush=True)
 
 metadata = {
     "display_name": "Motion Blur",
@@ -11,7 +19,12 @@ metadata = {
 }
 
 inputs = [
-    {"var_name": "input_url", "display_name": "Input Image URL", "type": "text"},
+    {
+        "var_name": "input_url",
+        "display_name": "Input Image (URL or {name, uri, type})",
+        "type": "any",
+        "batch": True,
+    },
     {"var_name": "length", "display_name": "Length (pixels)", "type": "number"},
     {"var_name": "angle", "display_name": "Angle (degrees)", "type": "number"},
 ]
@@ -22,11 +35,14 @@ outputs = [
 
 
 async def execute(uid: str, token: str, inputs: dict) -> dict:
+    _debug_console("inputs", inputs)
+
     url = inputs.get("input_url", "")
     if not url:
         raise ValueError("input_url is required")
     length = int(inputs.get("length", 15))
     angle = float(inputs.get("angle", 0))
+    _debug_console("params", {"input_url": url, "length": length, "angle": angle})
 
     # Build a line kernel
     kernel_size = max(length, 1)
@@ -48,4 +64,6 @@ async def execute(uid: str, token: str, inputs: dict) -> dict:
     img = load_image_from_url(url)
     result = cv2.filter2D(img, -1, kernel)
     output_url = save_and_upload(result, uid, token, ".png")
-    return {"output_url": output_url}
+    outputs = {"output_url": output_url}
+    _debug_console("outputs", outputs)
+    return outputs

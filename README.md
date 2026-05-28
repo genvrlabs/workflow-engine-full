@@ -193,6 +193,9 @@ metadata = {
 - `var_name` — `snake_case`, used as the dict key in `execute()`  
 - `display_name` — human-readable label shown in the designer  
 - `type` — one of: `"number"` `"text"` `"boolean"` `"any"` `"list"` `"dict"`  
+- `batch` — optional. `true` = run once per list item (URLs or `{name, uri, type}` assets); `false` = treat the whole list as one input (e.g. stitch `parts`, concat `input_urls`). Media ports (`*_url`, `input_url`) auto-batch when given a list unless `batch: false`.
+
+The engine deconstructs inputs before `execute()` (see `nodes/input_utils.py`): asset objects become URL strings; batched runs return list outputs plus `batch_count`.
 
 5. **`execute` signature — never change it:**
 

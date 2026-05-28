@@ -11,7 +11,12 @@ metadata = {
 }
 
 inputs = [
-    {"var_name": "input_urls", "display_name": "Input Video URLs (list of strings)", "type": "list"},
+    {
+        "var_name": "input_urls",
+        "display_name": "Input Video URLs (list of strings)",
+        "type": "list",
+        "batch": False,
+    },
     {"var_name": "output_extension", "display_name": "Output Extension (e.g. mp4)", "type": "text"},
     {"var_name": "reencode", "display_name": "Re-encode (required for mixed codecs)", "type": "boolean"},
 ]

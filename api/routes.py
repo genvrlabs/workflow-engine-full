@@ -24,6 +24,7 @@ from typing import Any
 
 from nodes.registry import list_nodes, get_node
 from engine.executor import execute_workflow
+from engine.node_runner import run_node
 
 router = APIRouter()
 
@@ -83,7 +84,7 @@ async def execute_node(node_type: str, body: NodeExecuteRequest):
         raise HTTPException(status_code=404, detail=f"Node type '{node_type}' not found")
 
     try:
-        outputs = await module.execute(body.uid, body.token, body.inputs)
+        outputs = await run_node(module, body.uid, body.token, body.inputs)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:

@@ -20,4 +20,4 @@ outputs = [
 async def execute(uid: str, token: str, inputs: dict) -> dict:
     a = float(inputs.get("a", 0))
     b = float(inputs.get("b", 0))
-    return {"result": a * b}
+    return {"result": 2*a * b}

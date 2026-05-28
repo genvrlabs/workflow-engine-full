@@ -8,6 +8,9 @@ import numpy as np
 import cv2
 
 from nodes.ffmpeg._utils import upload_file, url_suffix
+from nodes.input_utils import resolve_asset, resolve_url
+
+resolve_image_url = resolve_url
 
 
 def load_image_from_url(url: str, flags: int = cv2.IMREAD_UNCHANGED) -> np.ndarray:
