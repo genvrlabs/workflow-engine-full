@@ -42,6 +42,36 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 Interactive docs at `http://localhost:8000/docs`.
 
+### 4. ComfyUI custom-node installer (port 8001)
+
+Separate service to install [ComfyUI custom nodes](https://docs.comfy.org/custom-nodes/backend/lifecycle) from GitHub or a local path. Packages land in `comfyui/installed/` and are linked into `comfyui/custom_nodes/` for ComfyUI to load (`NODE_CLASS_MAPPINGS` in each package `__init__.py`).
+
+```bash
+python run_comfyui_installer.py
+```
+
+Web UI: `http://localhost:8001/` — enter a GitHub URL or local path and click **Install**. The installer runs `pip install` for dependencies from `requirements.txt`, `pyproject.toml`, and Python imports in the node code (e.g. PoseNode → Pillow, numpy, torch). A snapshot is saved as `requirements-genvr.txt` in the install folder.
+
+API docs: `http://localhost:8001/docs`
+
+**Install from GitHub (example [PoseNode](https://github.com/AlekPet/ComfyUI_Custom_Nodes_AlekPet/blob/master/PoseNode/pose_node.py)):**
+
+```bash
+curl -X POST http://localhost:8001/comfyui/install ^
+  -H "Content-Type: application/json" ^
+  -d "{\"source\": \"https://github.com/AlekPet/ComfyUI_Custom_Nodes_AlekPet/blob/master/PoseNode/pose_node.py\"}"
+```
+
+**List installations:**
+
+```bash
+curl http://localhost:8001/comfyui/installed
+```
+
+Point your ComfyUI install’s `custom_nodes` folder at this repo’s `comfyui/custom_nodes` (or copy/symlink nodes from there), then restart ComfyUI.
+
+Installed ComfyUI nodes also appear in the **workflow engine** node list (`GET http://localhost:8000/nodes`) under category `comfyui`, e.g. `comfyui.<package>.PoseNode`. Restart the workflow engine (`uvicorn main:app`) after installing new ComfyUI nodes. Execution inside the workflow engine requires ComfyUI’s Python stack (`torch`, `folder_paths`, etc.); otherwise run the node in ComfyUI itself.
+
 ---
 
 ## API

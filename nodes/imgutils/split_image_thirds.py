@@ -13,7 +13,7 @@ def _debug_console(label: str, data) -> None:
 metadata = {
     "display_name": "Split Image Thirds",
     "description": "Cuts an image into three equal vertical parts (full height) and uploads each to GenVR.",
-    "category": "core",
+    "category": "imgutils",
     "color": "teal",
 }
 

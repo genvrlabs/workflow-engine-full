@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ComfyUI Custom Node Installer</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2f3d;
+      --text: #e8eaef;
+      --muted: #8b92a8;
+      --accent: #5b8def;
+      --accent-hover: #7aa3f5;
+      --success: #3dd68c;
+      --error: #f07178;
+      --warn: #ebc88d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .card h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 1rem; font-weight: 600; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; }
+    input[type="text"] {
+      width: 100%;
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; margin-top: 1rem; }
+    .row .field { flex: 1; min-width: 200px; }
+    .row .field.narrow { flex: 0 0 140px; min-width: 120px; }
+    button {
+      padding: 0.65rem 1.25rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+    .btn-danger { background: transparent; color: var(--error); border: 1px solid var(--error); padding: 0.35rem 0.65rem; font-size: 0.8rem; }
+    .example { font-size: 0.8rem; color: var(--muted); margin-top: 0.5rem; }
+    .example code { color: var(--accent); font-size: 0.78rem; word-break: break-all; }
+    #result { display: none; }
+    #result.visible { display: block; }
+    .status-ok { color: var(--success); }
+    .status-err { color: var(--error); }
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      font-size: 0.8rem;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0.5rem 0 0;
+    }
+    .paths dt { color: var(--muted); font-size: 0.8rem; margin-top: 0.75rem; }
+    .paths dd { margin: 0.2rem 0 0; font-size: 0.85rem; word-break: break-all; }
+    .paths dd a { color: var(--accent); }
+    ul.logs { margin: 0.5rem 0 0; padding-left: 1.2rem; font-size: 0.85rem; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+    .empty { color: var(--muted); font-size: 0.9rem; padding: 0.5rem 0; }
+    .spinner { display: inline-block; width: 1em; height: 1em; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: -0.15em; margin-right: 0.4em; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>ComfyUI Custom Node Installer</h1>
+    <p class="sub">Install nodes from a GitHub URL or local folder. Files go to <code>comfyui/installed</code> and link into <code>comfyui/custom_nodes</code>. After install, <strong>restart the workflow engine</strong> (port 8000) — nodes show in <code>GET /nodes</code> under category <code>comfyui</code>.</p>
+
+    <div class="card">
+      <h2>Install node</h2>
+      <label for="source">GitHub URL or local path</label>
+      <input type="text" id="source" placeholder="https://github.com/.../blob/master/PoseNode/pose_node.py  or  C:\path\to\node" />
+      <p class="example">Example: <code id="exampleUrl">https://github.com/AlekPet/ComfyUI_Custom_Nodes_AlekPet/blob/master/PoseNode/pose_node.py</code>
+        <button type="button" class="btn-ghost" style="margin-left:0.5rem;padding:0.2rem 0.5rem;font-size:0.75rem" id="useExample">Use example</button>
+      </p>
+      <div class="row">
+        <div class="field narrow">
+          <label for="branch">Branch (optional)</label>
+          <input type="text" id="branch" placeholder="master" />
+        </div>
+        <button type="button" class="btn-primary" id="installBtn">Install</button>
+      </div>
+    </div>
+
+    <div class="card" id="result">
+      <h2 id="resultTitle">Install result</h2>
+      <p id="resultMessage"></p>
+      <dl class="paths" id="paths"></dl>
+      <ul class="logs" id="logs"></ul>
+      <pre id="resultJson" hidden></pre>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0">Installed nodes</h2>
+        <button type="button" class="btn-ghost" id="refreshBtn">Refresh</button>
+      </div>
+      <div id="installedList"><p class="empty">Loading…</p></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const API = "";
+
+    $("useExample").onclick = () => {
+      $("source").value = $("exampleUrl").textContent;
+    };
+
+    async function loadInstalled() {
+      const el = $("installedList");
+      try {
+        const res = await fetch(`${API}/comfyui/installed`);
+        const data = await res.json();
+        const items = data.installed || [];
+        if (!items.length) {
+          el.innerHTML = '<p class="empty">No nodes installed yet.</p>';
+          return;
+        }
+        el.innerHTML = `
+          <table>
+            <thead><tr><th>ID</th><th>Nodes</th><th>Paths</th><th></th></tr></thead>
+            <tbody>
+              ${items.map((row) => `
+                <tr>
+                  <td><code>${esc(row.id)}</code></td>
+                  <td>${(row.node_names || []).join(", ") || "—"}</td>
+                  <td style="font-size:0.78rem;max-width:280px;word-break:break-all">
+                    ${row.custom_nodes_path ? `<div>↳ ${esc(row.custom_nodes_path)}</div>` : ""}
+                  </td>
+                  <td><button class="btn-danger" data-slug="${esc(row.id)}">Remove</button></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>`;
+        el.querySelectorAll(".btn-danger").forEach((btn) => {
+          btn.onclick = () => uninstall(btn.dataset.slug);
+        });
+      } catch (e) {
+        el.innerHTML = `<p class="empty status-err">Failed to load: ${esc(e.message)}</p>`;
+      }
+    }
+
+    async function uninstall(slug) {
+      if (!confirm(`Remove installation "${slug}"?`)) return;
+      try {
+        const res = await fetch(`${API}/comfyui/installed/${encodeURIComponent(slug)}`, { method: "DELETE" });
+        if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+        loadInstalled();
+      } catch (e) {
+        alert("Remove failed: " + e.message);
+      }
+    }
+
+    $("installBtn").onclick = async () => {
+      const source = $("source").value.trim();
+      if (!source) {
+        alert("Enter a GitHub URL or local path.");
+        return;
+      }
+      const branch = $("branch").value.trim() || null;
+      const btn = $("installBtn");
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Installing…';
+
+      const result = $("result");
+      result.classList.add("visible");
+      $("resultMessage").textContent = "";
+      $("paths").innerHTML = "";
+      $("logs").innerHTML = "";
+      $("resultJson").hidden = true;
+
+      try {
+        const res = await fetch(`${API}/comfyui/install`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source, branch }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+
+        $("resultTitle").textContent = "Install succeeded";
+        $("resultMessage").innerHTML = `<span class="status-ok">Installed <strong>${esc(data.id)}</strong></span>`;
+        if (data.node_names?.length) {
+          $("resultMessage").innerHTML += ` — nodes: ${data.node_names.map(esc).join(", ")}`;
+        }
+        $("paths").innerHTML = `
+          <dt>Installed path</dt><dd>${esc(data.installed_path)}</dd>
+          <dt>Custom nodes link</dt><dd>${esc(data.custom_nodes_path)}</dd>
+        `;
+        if (data.dependencies?.length) {
+          $("paths").innerHTML += `<dt>Dependencies installed</dt><dd>${data.dependencies.map(esc).join(", ")}</dd>`;
+        }
+        if (data.logs?.length) {
+          $("logs").innerHTML = data.logs.map((l) => `<li>${esc(l)}</li>`).join("");
+        }
+        $("resultJson").textContent = JSON.stringify(data, null, 2);
+        $("resultJson").hidden = false;
+        loadInstalled();
+      } catch (e) {
+        $("resultTitle").textContent = "Install failed";
+        $("resultMessage").innerHTML = `<span class="status-err">${esc(e.message)}</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Install";
+      }
+    };
+
+    $("refreshBtn").onclick = loadInstalled;
+    function esc(s) {
+      if (s == null) return "";
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    }
+    loadInstalled();
+  </script>
+</body>
+</html>

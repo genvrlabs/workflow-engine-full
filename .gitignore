@@ -1,2 +1,8 @@
 venv/
 .venv/
+
+# ComfyUI installer artifacts
+comfyui/installed/*
+!comfyui/installed/.gitkeep
+comfyui/custom_nodes/*
+!comfyui/custom_nodes/.gitkeep

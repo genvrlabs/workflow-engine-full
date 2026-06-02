@@ -51,7 +51,14 @@ registry: dict[str, Any] = _load_node_modules()
 
 def get_node(node_type: str):
     """Return the node module for the given type, or None."""
-    return registry.get(node_type)
+    if node_type in registry:
+        return registry[node_type]
+    try:
+        from comfyui_custom_nodes.workflow_bridge import get_comfy_node_module
+
+        return get_comfy_node_module(node_type)
+    except ImportError:
+        return None
 
 
 def list_nodes() -> list[dict]:
@@ -64,4 +71,10 @@ def list_nodes() -> list[dict]:
             "inputs": [p if isinstance(p, dict) else p.to_dict() for p in module.inputs],
             "outputs": [p if isinstance(p, dict) else p.to_dict() for p in module.outputs],
         })
+    try:
+        from comfyui_custom_nodes.workflow_bridge import list_comfy_nodes
+
+        result.extend(list_comfy_nodes())
+    except ImportError:
+        pass
     return result

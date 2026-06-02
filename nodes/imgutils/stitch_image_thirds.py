@@ -18,7 +18,7 @@ def _debug_console(label: str, data) -> None:
 metadata = {
     "display_name": "Stitch Image Thirds",
     "description": "Joins left, center, and right image URLs side-by-side (full height) and uploads to GenVR.",
-    "category": "core",
+    "category": "imgutils",
     "color": "teal",
 }
 
@@ -238,7 +238,6 @@ def _urls_from_individual(inputs: dict) -> list[str] | None:
     if all(urls):
         return urls
 
-    # Whole array or asset list wired to one of the three inputs.
     for slot in (left, center, right):
         if isinstance(slot, str) and _strip_url(slot) and slot.strip()[0] not in "[{":
             continue
