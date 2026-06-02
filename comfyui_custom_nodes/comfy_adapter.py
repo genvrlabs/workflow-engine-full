@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from nodes.ffmpeg._utils import download_to_tempfile, upload_file, url_suffix
-from nodes.input_utils import is_asset, resolve_asset, resolve_url, unwrap_list, unwrap_scalar
+from nodes.input_utils import is_asset, resolve_url, unwrap_list, unwrap_scalar
 
 from comfyui_custom_nodes.comfy_debug import comfy_log
 
@@ -443,11 +443,9 @@ def adapt_comfy_output(
             if tmp.is_file():
                 tmp.unlink()
 
-        mime = "image/png"
-        name = f"{port_name}_{index}" if index else port_name
-        asset = resolve_asset({"name": name, "uri": uri, "type": mime}, default_name=name, default_type=mime)
-        asset["type"] = "img"
-        return asset
+        # GenVR designer: URL string on text+media ports (not {name, uri, type} dicts).
+        comfy_log(_LOG_NODE, "export.url", {"port": port_name, "uri": uri[:120]})
+        return uri
 
     if isinstance(value, (list, tuple)):
         return [

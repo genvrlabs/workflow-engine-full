@@ -29,6 +29,12 @@ from comfyui_custom_nodes.comfy_debug import comfy_log
 from comfyui_custom_nodes.config import CUSTOM_NODES_DIR, INSTALLED_DIR
 from comfyui_custom_nodes.scanner import read_existing_mappings
 
+# GenVR designer expects URL strings on text+media ports (not raw asset dicts).
+COMFY_MEDIA_OUTPUT_VAR = {
+    "IMAGE": "image_url",
+    "MASK": "mask_url",
+}
+
 COMFY_TYPE_TO_PORT = {
     "IMAGE": "image",
     "MASK": "mask",
@@ -188,6 +194,17 @@ def _build_ports(class_meta: dict[str, Any]) -> tuple[list[dict], list[dict]]:
     seen: dict[str, int] = {}
     for i, comfy_type in enumerate(returns):
         base = comfy_type.lower()
+        if is_comfy_media_output(comfy_type):
+            var = COMFY_MEDIA_OUTPUT_VAR.get(comfy_type.upper(), f"{base}_url")
+            outputs.append({
+                "var_name": var,
+                "display_name": f"{comfy_type} URL",
+                "type": "text",
+                "media": True,
+                "description": "Image URL for GenVR designer",
+            })
+            continue
+
         if len(returns) == 1:
             var = "output"
         elif type_counts.get(base, 0) == 1:
@@ -196,16 +213,12 @@ def _build_ports(class_meta: dict[str, Any]) -> tuple[list[dict], list[dict]]:
             n = seen.get(base, 0)
             seen[base] = n + 1
             var = base if n == 0 else f"{base}_{n}"
-        out_type = "text"
-        if is_comfy_media_output(comfy_type):
-            out_type = "text"
-        else:
-            out_type = COMFY_TYPE_TO_PORT.get(comfy_type, "any")
+        out_type = COMFY_TYPE_TO_PORT.get(comfy_type, "any")
         outputs.append({
             "var_name": var,
             "display_name": comfy_type,
             "type": out_type,
-            "description": "{name, uri, type} asset" if is_comfy_media_output(comfy_type) else "",
+            "description": "",
         })
 
     return inputs, outputs
