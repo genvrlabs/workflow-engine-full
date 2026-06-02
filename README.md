@@ -1,6 +1,6 @@
 # GenVR Workflow Engine
 
-A Python/FastAPI workflow engine that exposes pluggable **nodes** over HTTP. Built to integrate with the [GenVR Workflow Designer](https://genvr.com).
+A Python/FastAPI workflow engine that exposes pluggable **nodes** over HTTP. Built to integrate with the [GenVR Workflow Designer](https://app.genvrresearch.com/workflow2).
 
 ---
 
@@ -389,6 +389,8 @@ async def execute(uid: str, token: str, inputs: dict) -> dict:
 ---
 
 ## Calling from GenVR Workflow Designer
+
+Use the designer at [https://app.genvrresearch.com/workflow2](https://app.genvrresearch.com/workflow2).
 
 In the workflow designer, add a node of a custom type (e.g. `python_engine`) that:
 
