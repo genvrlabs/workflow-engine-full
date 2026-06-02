@@ -308,11 +308,58 @@ def _normalize_comfy_tensor(arr: Any, *, is_mask: bool = False) -> Any:
     return arr
 
 
-def _save_tensor_as_png(arr: Any, path: str, *, is_mask: bool = False) -> None:
+def _image_hw_from_tensor(arr: Any) -> tuple[int, int] | None:
+    """Height, width from a Comfy IMAGE tensor/array."""
+    import numpy as np
+
+    img = _normalize_comfy_tensor(arr, is_mask=False)
+    if img.ndim == 3:
+        return int(img.shape[0]), int(img.shape[1])
+    if img.ndim == 2:
+        return int(img.shape[0]), int(img.shape[1])
+    return None
+
+
+def _align_mask_to_image(mask_arr: Any, ref_image: Any | None) -> Any:
+    """Upscale MASK to match IMAGE size (PoseNode uses 64×64 placeholder masks)."""
+    import numpy as np
+    import torch
+
+    mask = _normalize_comfy_tensor(mask_arr, is_mask=True)
+    if ref_image is None:
+        return mask
+
+    target = _image_hw_from_tensor(ref_image)
+    if not target:
+        return mask
+    th, tw = target
+    mh, mw = mask.shape[0], mask.shape[1]
+    if mh == th and mw == tw:
+        return mask
+
+    t = torch.from_numpy(np.asarray(mask, dtype=np.float32)).unsqueeze(0).unsqueeze(0)
+    up = torch.nn.functional.interpolate(t, size=(th, tw), mode="bilinear", align_corners=False)
+    out = up.squeeze().numpy()
+    comfy_log(_LOG_NODE, "mask.upscaled", {"from": [mh, mw], "to": [th, tw]})
+    return out
+
+
+def _save_tensor_as_png(
+    arr: Any,
+    path: str,
+    *,
+    is_mask: bool = False,
+    reference_image: Any | None = None,
+) -> None:
     import numpy as np
     from PIL import Image
 
-    arr = _normalize_comfy_tensor(arr, is_mask=is_mask)
+    if is_mask:
+        arr = _align_mask_to_image(arr, reference_image)
+        # Comfy MASK: 0 = opaque (PoseNode uses 1-alpha). Invert for GenVR PNG preview.
+        arr = 1.0 - np.clip(arr, 0.0, 1.0)
+    else:
+        arr = _normalize_comfy_tensor(arr, is_mask=False)
 
     if arr.ndim == 2:
         img = Image.fromarray((np.clip(arr, 0, 1) * 255).astype(np.uint8), mode="L")
@@ -338,6 +385,7 @@ def adapt_comfy_output(
     token: str,
     port_name: str,
     index: int = 0,
+    reference_image: Any | None = None,
 ) -> Any:
     """Convert ComfyUI return values to GenVR assets or pass-through scalars."""
     if value is None:
@@ -367,14 +415,23 @@ def adapt_comfy_output(
         hasattr(value, "detach") and hasattr(value, "shape")
     ):
         arr = _tensor_to_numpy(value)
+        norm_mask = _normalize_comfy_tensor(arr, is_mask=True) if is_mask else None
         comfy_log(_LOG_NODE, "export.tensor", {
             "port": port_name,
             "ctype": ctype,
             "shape": list(getattr(arr, "shape", ())),
+            "mask_min": float(norm_mask.min()) if norm_mask is not None else None,
+            "mask_max": float(norm_mask.max()) if norm_mask is not None else None,
+            "has_reference_image": reference_image is not None,
         })
         tmp = Path(os.environ.get("TEMP", "/tmp")) / f"genvr_comfy_out_{uuid.uuid4().hex}.png"
         try:
-            _save_tensor_as_png(arr, str(tmp), is_mask=is_mask)
+            _save_tensor_as_png(
+                arr,
+                str(tmp),
+                is_mask=is_mask,
+                reference_image=reference_image if is_mask else None,
+            )
             uri = upload_file(uid, token, str(tmp))
         finally:
             if tmp.is_file():
@@ -395,6 +452,7 @@ def adapt_comfy_output(
                 token=token,
                 port_name=port_name,
                 index=i,
+                reference_image=reference_image,
             )
             for i, v in enumerate(value)
         ]

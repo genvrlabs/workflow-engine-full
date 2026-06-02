@@ -304,6 +304,13 @@ def _make_execute(
                     ) from exc
 
             if isinstance(result, tuple):
+                ref_image = None
+                for i, value in enumerate(result):
+                    rtype = (return_types[i] if i < len(return_types) else "") or ""
+                    if rtype.upper() == "IMAGE":
+                        ref_image = value
+                        break
+
                 out: dict[str, Any] = {}
                 for i, value in enumerate(result):
                     key = output_keys[i] if i < len(output_keys) else f"output_{i}"
@@ -315,6 +322,7 @@ def _make_execute(
                         token=token,
                         port_name=key,
                         index=i,
+                        reference_image=ref_image,
                     )
                 return out
             key = output_keys[0] if output_keys else "output"
