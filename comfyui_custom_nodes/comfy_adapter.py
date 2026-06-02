@@ -358,6 +358,12 @@ def _save_tensor_as_png(
         arr = _align_mask_to_image(arr, reference_image)
         # Comfy MASK: 0 = opaque (PoseNode uses 1-alpha). Invert for GenVR PNG preview.
         arr = 1.0 - np.clip(arr, 0.0, 1.0)
+        comfy_log(_LOG_NODE, "mask.export.ready", {
+            "shape": list(arr.shape),
+            "min": float(arr.min()),
+            "max": float(arr.max()),
+            "mean": float(arr.mean()),
+        })
     else:
         arr = _normalize_comfy_tensor(arr, is_mask=False)
 

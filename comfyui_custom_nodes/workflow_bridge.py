@@ -180,10 +180,22 @@ def _build_ports(class_meta: dict[str, Any]) -> tuple[list[dict], list[dict]]:
 
     returns = class_meta.get("return_types") or ["output"]
     outputs = []
+    type_counts: dict[str, int] = {}
+    for comfy_type in returns:
+        key = comfy_type.lower()
+        type_counts[key] = type_counts.get(key, 0) + 1
+
+    seen: dict[str, int] = {}
     for i, comfy_type in enumerate(returns):
-        var = comfy_type.lower() if len(returns) > 1 else "output"
-        if len(returns) > 1 and i > 0:
-            var = f"{comfy_type.lower()}_{i}"
+        base = comfy_type.lower()
+        if len(returns) == 1:
+            var = "output"
+        elif type_counts.get(base, 0) == 1:
+            var = base
+        else:
+            n = seen.get(base, 0)
+            seen[base] = n + 1
+            var = base if n == 0 else f"{base}_{n}"
         out_type = "text"
         if is_comfy_media_output(comfy_type):
             out_type = "text"
@@ -324,6 +336,10 @@ def _make_execute(
                         index=i,
                         reference_image=ref_image,
                     )
+                comfy_log(mapping_key, "execute.outputs", {
+                    k: {"uri": (v.get("uri", "")[:80] + "...") if isinstance(v, dict) else str(v)[:80]}
+                    for k, v in out.items()
+                })
                 return out
             key = output_keys[0] if output_keys else "output"
             rtype = return_types[0] if return_types else None
