@@ -18,9 +18,14 @@ POST /workflow/execute
     Body: { uid, token, nodes: [...], edges: [...] }
 """
 
+import traceback
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any
+
+from comfyui_custom_nodes.comfy_debug import comfy_log
+from comfyui_custom_nodes.workflow_bridge import is_comfy_node_type
 
 from nodes.registry import list_nodes, get_node
 from engine.executor import execute_workflow
@@ -83,11 +88,27 @@ async def execute_node(node_type: str, body: NodeExecuteRequest):
     if module is None:
         raise HTTPException(status_code=404, detail=f"Node type '{node_type}' not found")
 
+    if is_comfy_node_type(node_type):
+        comfy_log(node_type.split(".")[-1], "api.execute.request", {
+            "node_type": node_type,
+            "inputs": body.inputs,
+        })
+
     try:
         outputs = await run_node(module, body.uid, body.token, body.inputs)
     except ValueError as exc:
+        if is_comfy_node_type(node_type):
+            comfy_log(node_type.split(".")[-1], "api.execute.422", {
+                "detail": str(exc),
+                "traceback": traceback.format_exc(),
+            })
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
+        if is_comfy_node_type(node_type):
+            comfy_log(node_type.split(".")[-1], "api.execute.500", {
+                "detail": str(exc),
+                "traceback": traceback.format_exc(),
+            })
         raise HTTPException(status_code=500, detail=str(exc))
 
     return {"outputs": outputs}

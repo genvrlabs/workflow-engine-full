@@ -19,6 +19,10 @@ from typing import Any
 from nodes.ffmpeg._utils import download_to_tempfile, upload_file, url_suffix
 from nodes.input_utils import is_asset, resolve_asset, resolve_url, unwrap_list, unwrap_scalar
 
+from comfyui_custom_nodes.comfy_debug import comfy_log
+
+_LOG_NODE = "adapter"
+
 # ComfyUI type names from INPUT_TYPES / RETURN_TYPES
 COMFY_IMAGE_TYPES = frozenset({"IMAGE"})
 COMFY_MASK_TYPES = frozenset({"MASK"})
@@ -57,14 +61,39 @@ def is_comfy_media_output(comfy_type: str | None) -> bool:
     return bool(comfy_type and comfy_type.upper() in COMFY_MEDIA_TYPES)
 
 
-@contextmanager
-def comfy_runtime(input_dir: Path):
-    """Install minimal ComfyUI stubs and a temp input directory for one node run."""
-    input_dir = Path(input_dir)
-    input_dir.mkdir(parents=True, exist_ok=True)
-    input_str = str(input_dir.resolve())
+def _comfy_pillow(fn, arg):
+    """ComfyUI-compatible PIL loader (truncated image retry)."""
+    from PIL import ImageFile, UnidentifiedImageError
 
-    folder_paths = types.ModuleType("folder_paths")
+    prev_value = None
+    try:
+        return fn(arg)
+    except (OSError, UnidentifiedImageError, ValueError):
+        prev_value = ImageFile.LOAD_TRUNCATED_IMAGES
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        try:
+            return fn(arg)
+        finally:
+            if prev_value is not None:
+                ImageFile.LOAD_TRUNCATED_IMAGES = prev_value
+
+
+def _install_comfy_shims(input_str: str) -> tuple[Any, Any]:
+    """
+    Patch folder_paths / node_helpers in sys.modules in-place.
+
+    Comfy node files do ``import node_helpers`` once; replacing sys.modules
+    alone leaves stale module references without ``pillow``.
+    """
+    fp = sys.modules.get("folder_paths")
+    if fp is None:
+        fp = types.ModuleType("folder_paths")
+        sys.modules["folder_paths"] = fp
+
+    nh = sys.modules.get("node_helpers")
+    if nh is None:
+        nh = types.ModuleType("node_helpers")
+        sys.modules["node_helpers"] = nh
 
     def get_input_directory() -> str:
         return input_str
@@ -85,32 +114,94 @@ def comfy_runtime(input_dir: Path):
     def get_output_directory() -> str:
         return input_str
 
+    def exists_annotated_filepath(filename: str) -> bool:
+        try:
+            path = get_annotated_filepath(filename)
+            return os.path.isfile(path)
+        except (OSError, ValueError, FileNotFoundError):
+            return False
+
     def add_model_folder_path(*_args, **_kwargs) -> None:
         pass
 
-    folder_paths.get_input_directory = get_input_directory
-    folder_paths.get_annotated_filepath = get_annotated_filepath
-    folder_paths.get_output_directory = get_output_directory
-    folder_paths.add_model_folder_path = add_model_folder_path
+    fp.get_input_directory = get_input_directory
+    fp.get_annotated_filepath = get_annotated_filepath
+    fp.get_output_directory = get_output_directory
+    fp.exists_annotated_filepath = exists_annotated_filepath
+    fp.add_model_folder_path = add_model_folder_path
 
-    node_helpers = types.ModuleType("node_helpers")
-    node_helpers.hasher = types.SimpleNamespace()
+    nh.pillow = _comfy_pillow
+    if not hasattr(nh, "hasher"):
+        nh.hasher = types.SimpleNamespace()
 
-    prev_fp = sys.modules.get("folder_paths")
-    prev_nh = sys.modules.get("node_helpers")
-    sys.modules["folder_paths"] = folder_paths
-    sys.modules["node_helpers"] = node_helpers
+    comfy_log(_LOG_NODE, "shims.installed", {
+        "input_dir": input_str,
+        "node_helpers_has_pillow": hasattr(nh, "pillow"),
+        "folder_paths_module": getattr(fp, "__file__", repr(fp)),
+    })
+    return fp, nh
+
+
+def rebind_comfy_shims(package_module_name: str) -> None:
+    """Point loaded Comfy submodules at the current shim modules."""
+    nh = sys.modules.get("node_helpers")
+    fp = sys.modules.get("folder_paths")
+    if nh is None or fp is None:
+        return
+
+    rebound: list[str] = []
+    for key, mod in list(sys.modules.items()):
+        if key != package_module_name and not key.startswith(package_module_name + "."):
+            continue
+        if mod is None:
+            continue
+        changed = False
+        if getattr(mod, "node_helpers", None) is not nh:
+            mod.node_helpers = nh
+            changed = True
+        if getattr(mod, "folder_paths", None) is not fp:
+            mod.folder_paths = fp
+            changed = True
+        if changed:
+            rebound.append(key)
+
+    if rebound:
+        comfy_log(_LOG_NODE, "shims.rebound", {
+            "modules": rebound,
+            "node_helpers_has_pillow": hasattr(nh, "pillow"),
+        })
+
+
+def purge_comfy_package_modules(package_module_name: str, package_dir: Path) -> None:
+    """Drop cached imports so the next load picks up shim patches."""
+    stem = package_dir.name
+    removed: list[str] = []
+    for key in list(sys.modules):
+        if (
+            key == package_module_name
+            or key.startswith(package_module_name + ".")
+            or key == "pose_node"
+            or key.endswith(".pose_node")
+            or (stem in key and "pose_node" in key)
+        ):
+            del sys.modules[key]
+            removed.append(key)
+    if removed:
+        comfy_log(_LOG_NODE, "purge.modules", {"removed": removed})
+
+
+@contextmanager
+def comfy_runtime(input_dir: Path):
+    """Install minimal ComfyUI stubs and a temp input directory for one node run."""
+    input_dir = Path(input_dir)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_str = str(input_dir.resolve())
+
+    _install_comfy_shims(input_str)
     try:
         yield input_dir
     finally:
-        if prev_fp is None:
-            sys.modules.pop("folder_paths", None)
-        else:
-            sys.modules["folder_paths"] = prev_fp
-        if prev_nh is None:
-            sys.modules.pop("node_helpers", None)
-        else:
-            sys.modules["node_helpers"] = prev_nh
+        pass
 
 
 def _download_to_input_dir(value: Any, input_dir: Path) -> str:
@@ -136,11 +227,13 @@ def _download_to_input_dir(value: Any, input_dir: Path) -> str:
     if not ext.startswith("."):
         ext = f".{ext}"
 
+    comfy_log(_LOG_NODE, "download.start", {"url": url[:200], "ext": ext})
     tmp_path = download_to_tempfile(url, suffix=ext)
     try:
         base = f"genvr_{uuid.uuid4().hex[:12]}{ext}"
         dest = input_dir / base
         shutil.move(tmp_path, dest)
+        comfy_log(_LOG_NODE, "download.done", {"filename": base, "bytes": dest.stat().st_size})
         return base
     except Exception:
         if os.path.isfile(tmp_path):

@@ -14,13 +14,18 @@ import types
 from pathlib import Path
 from typing import Any
 
+import traceback
+
 from comfyui_custom_nodes.comfy_adapter import (
     adapt_comfy_input,
     adapt_comfy_output,
     comfy_runtime,
     is_comfy_media_input,
     is_comfy_media_output,
+    purge_comfy_package_modules,
+    rebind_comfy_shims,
 )
+from comfyui_custom_nodes.comfy_debug import comfy_log
 from comfyui_custom_nodes.config import CUSTOM_NODES_DIR, INSTALLED_DIR
 from comfyui_custom_nodes.scanner import read_existing_mappings
 
@@ -209,20 +214,24 @@ def _make_execute(
         if not init_path.is_file():
             raise ValueError(f"package missing __init__.py: {package_dir}")
 
+        comfy_log(mapping_key, "execute.raw_inputs", inputs)
+
         with tempfile.TemporaryDirectory(prefix="genvr_comfy_in_") as tmp_in:
             input_dir = Path(tmp_in)
             comfy_inputs = dict(inputs)
             for name in input_names:
                 if name not in comfy_inputs:
                     continue
+                raw = comfy_inputs[name]
                 comfy_inputs[name] = adapt_comfy_input(
-                    comfy_inputs[name],
+                    raw,
                     comfy_type=input_types.get(name),
                     var_name=name,
                     input_dir=input_dir,
                 )
+                comfy_log(mapping_key, f"adapt_input.{name}", {"raw": raw, "adapted": comfy_inputs[name]})
             for name, value in inputs.items():
-                if name in comfy_inputs:
+                if name in comfy_inputs and name in input_names:
                     continue
                 comfy_inputs[name] = adapt_comfy_input(
                     value,
@@ -231,7 +240,12 @@ def _make_execute(
                     input_dir=input_dir,
                 )
 
+            files = sorted(p.name for p in input_dir.iterdir() if p.is_file())
+            comfy_log(mapping_key, "input_dir.files", {"dir": str(input_dir), "files": files})
+
             module_name = f"_genvr_comfy_{package_dir.name}"
+            purge_comfy_package_modules(module_name, package_dir)
+
             with comfy_runtime(input_dir):
                 spec = importlib.util.spec_from_file_location(
                     module_name,
@@ -245,6 +259,7 @@ def _make_execute(
                 sys.modules[module_name] = mod
                 try:
                     spec.loader.exec_module(mod)
+                    rebind_comfy_shims(module_name)
                     mappings = getattr(mod, "NODE_CLASS_MAPPINGS", {})
                     node_cls = mappings.get(mapping_key)
                     if node_cls is None:
@@ -257,15 +272,31 @@ def _make_execute(
 
                     fn = getattr(instance, fn_name)
                     if input_names:
-                        args = [comfy_inputs.get(name) for name in input_names]
+                        missing = [n for n in input_names if comfy_inputs.get(n) is None]
+                        if missing:
+                            raise ValueError(
+                                f"missing required input(s) {missing}; "
+                                f"received keys {list(inputs.keys())}"
+                            )
+                        args = [comfy_inputs[name] for name in input_names]
                     else:
                         args = [comfy_inputs.get("input") or comfy_inputs.get("image")]
-                    args = [a for a in args if a is not None]
-                    if not args and comfy_inputs:
-                        args = [next(iter(comfy_inputs.values()))]
+                        args = [a for a in args if a is not None]
+                        if not args and comfy_inputs:
+                            args = [next(iter(comfy_inputs.values()))]
 
+                    comfy_log(mapping_key, "execute.call", {"fn": fn_name, "args": args})
                     result = fn(*args)
+                    comfy_log(mapping_key, "execute.result", {
+                        "type": type(result).__name__,
+                        "len": len(result) if isinstance(result, tuple) else None,
+                    })
                 except Exception as exc:
+                    comfy_log(mapping_key, "execute.error", {
+                        "error": str(exc),
+                        "type": type(exc).__name__,
+                        "traceback": traceback.format_exc(),
+                    })
                     raise ValueError(
                         f"ComfyUI node '{mapping_key}' failed "
                         f"(install torch/Pillow/opencv in this venv if missing). "
