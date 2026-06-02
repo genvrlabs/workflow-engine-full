@@ -282,12 +282,38 @@ def _tensor_to_numpy(tensor: Any) -> Any:
     return arr
 
 
-def _save_tensor_as_png(arr: Any, path: str) -> None:
+def _normalize_comfy_tensor(arr: Any, *, is_mask: bool = False) -> Any:
+    """Comfy IMAGE/MASK layouts -> (H, W) or (H, W, C) numpy array."""
+    import numpy as np
+
+    arr = np.asarray(arr, dtype=np.float32)
+    if arr.ndim == 4:
+        return arr[0]
+
+    if arr.ndim != 3:
+        return arr
+
+    # Channels-last image: (H, W, 1|3|4)
+    if arr.shape[-1] in (1, 3, 4):
+        return arr
+
+    # Batch-first: (B, H, W) — standard Comfy MASK, e.g. (1, 64, 64)
+    if arr.shape[0] < arr.shape[1] and arr.shape[0] < arr.shape[2]:
+        return arr[0]
+
+    # Channels-first image: (C, H, W)
+    if not is_mask and arr.shape[0] in (1, 3, 4):
+        return np.transpose(arr, (1, 2, 0))
+
+    return arr
+
+
+def _save_tensor_as_png(arr: Any, path: str, *, is_mask: bool = False) -> None:
     import numpy as np
     from PIL import Image
 
-    if arr.ndim == 4:
-        arr = arr[0]
+    arr = _normalize_comfy_tensor(arr, is_mask=is_mask)
+
     if arr.ndim == 2:
         img = Image.fromarray((np.clip(arr, 0, 1) * 255).astype(np.uint8), mode="L")
     elif arr.ndim == 3 and arr.shape[-1] in (1, 3, 4):
@@ -323,17 +349,32 @@ def adapt_comfy_output(
             import torch
 
             if isinstance(value, torch.Tensor) and value.ndim >= 2:
-                ctype = "MASK" if value.shape[-1] == 1 or value.ndim == 2 else "IMAGE"
+                sh = value.shape
+                if value.ndim == 2:
+                    ctype = "MASK"
+                elif value.ndim == 3 and len(sh) == 3 and sh[0] < sh[1] and sh[0] < sh[2]:
+                    ctype = "MASK"
+                elif sh[-1] == 1:
+                    ctype = "MASK"
+                else:
+                    ctype = "IMAGE"
         except ImportError:
             pass
+
+    is_mask = ctype == "MASK"
 
     if ctype in COMFY_MEDIA_TYPES or (
         hasattr(value, "detach") and hasattr(value, "shape")
     ):
         arr = _tensor_to_numpy(value)
+        comfy_log(_LOG_NODE, "export.tensor", {
+            "port": port_name,
+            "ctype": ctype,
+            "shape": list(getattr(arr, "shape", ())),
+        })
         tmp = Path(os.environ.get("TEMP", "/tmp")) / f"genvr_comfy_out_{uuid.uuid4().hex}.png"
         try:
-            _save_tensor_as_png(arr, str(tmp))
+            _save_tensor_as_png(arr, str(tmp), is_mask=is_mask)
             uri = upload_file(uid, token, str(tmp))
         finally:
             if tmp.is_file():
