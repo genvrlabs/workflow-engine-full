@@ -2,7 +2,7 @@
 GenVR <-> ComfyUI I/O adapter.
 
 Inputs: URL strings, {name, uri, type} assets, or lists of those (batch handled by node_runner).
-Outputs: Comfy IMAGE/MASK tensors -> GenVR {name, uri, type} assets.
+Outputs: Comfy IMAGE/MASK tensors -> uploaded https URL strings.
 """
 
 from __future__ import annotations
@@ -271,6 +271,38 @@ def adapt_comfy_input(value: Any, *, comfy_type: str | None, var_name: str, inpu
     return unwrap_scalar(value)
 
 
+def coerce_media_url(value: Any, *, port: str = "") -> str:
+    """Always return a plain https URL string for GenVR media outputs."""
+    label = port or "output"
+
+    if value is None or value == "":
+        raise ValueError(f"{label}: expected URL string, got empty value")
+
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("http://") or text.startswith("https://"):
+            return text
+        if text.startswith("{"):
+            import json
+
+            try:
+                return coerce_media_url(json.loads(text), port=label)
+            except json.JSONDecodeError:
+                pass
+        raise ValueError(f"{label}: expected http(s) URL, got: {text[:120]}")
+
+    if isinstance(value, dict):
+        uri = resolve_url(value)
+        if uri:
+            return uri
+        raise ValueError(f"{label}: asset dict missing uri/url")
+
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        return coerce_media_url(value[0], port=label)
+
+    raise ValueError(f"{label}: expected URL string, got {type(value).__name__}")
+
+
 def _tensor_to_numpy(tensor: Any) -> Any:
     import numpy as np
 
@@ -443,9 +475,9 @@ def adapt_comfy_output(
             if tmp.is_file():
                 tmp.unlink()
 
-        # GenVR designer: URL string on text+media ports (not {name, uri, type} dicts).
-        comfy_log(_LOG_NODE, "export.url", {"port": port_name, "uri": uri[:120]})
-        return uri
+        url = coerce_media_url(uri, port=port_name)
+        comfy_log(_LOG_NODE, "export.url", {"port": port_name, "url": url[:120]})
+        return url
 
     if isinstance(value, (list, tuple)):
         return [

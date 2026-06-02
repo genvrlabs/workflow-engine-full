@@ -19,6 +19,7 @@ import traceback
 from comfyui_custom_nodes.comfy_adapter import (
     adapt_comfy_input,
     adapt_comfy_output,
+    coerce_media_url,
     comfy_runtime,
     is_comfy_media_input,
     is_comfy_media_output,
@@ -29,10 +30,10 @@ from comfyui_custom_nodes.comfy_debug import comfy_log
 from comfyui_custom_nodes.config import CUSTOM_NODES_DIR, INSTALLED_DIR
 from comfyui_custom_nodes.scanner import read_existing_mappings
 
-# GenVR designer expects URL strings on text+media ports (not raw asset dicts).
+# GenVR designer: plain URL strings on ports named image / mask.
 COMFY_MEDIA_OUTPUT_VAR = {
-    "IMAGE": "image_url",
-    "MASK": "mask_url",
+    "IMAGE": "image",
+    "MASK": "mask",
 }
 
 COMFY_TYPE_TO_PORT = {
@@ -229,6 +230,7 @@ def _make_execute(
     mapping_key: str,
     input_names: list[str],
     output_keys: list[str],
+    media_output_keys: frozenset[str],
     input_types: dict[str, str],
     return_types: list[str],
 ):
@@ -340,7 +342,7 @@ def _make_execute(
                 for i, value in enumerate(result):
                     key = output_keys[i] if i < len(output_keys) else f"output_{i}"
                     rtype = return_types[i] if i < len(return_types) else None
-                    out[key] = adapt_comfy_output(
+                    raw = adapt_comfy_output(
                         value,
                         comfy_type=rtype,
                         uid=uid,
@@ -349,20 +351,30 @@ def _make_execute(
                         index=i,
                         reference_image=ref_image,
                     )
+                    out[key] = (
+                        coerce_media_url(raw, port=key)
+                        if key in media_output_keys
+                        else raw
+                    )
                 comfy_log(mapping_key, "execute.outputs", {
-                    k: {"uri": (v.get("uri", "")[:80] + "...") if isinstance(v, dict) else str(v)[:80]}
+                    k: (str(v)[:100] if not isinstance(v, dict) else f"DICT:{list(v.keys())}")
                     for k, v in out.items()
                 })
                 return out
             key = output_keys[0] if output_keys else "output"
             rtype = return_types[0] if return_types else None
+            raw = adapt_comfy_output(
+                result,
+                comfy_type=rtype,
+                uid=uid,
+                token=token,
+                port_name=key,
+            )
             return {
-                key: adapt_comfy_output(
-                    result,
-                    comfy_type=rtype,
-                    uid=uid,
-                    token=token,
-                    port_name=key,
+                key: (
+                    coerce_media_url(raw, port=key)
+                    if key in media_output_keys
+                    else raw
                 )
             }
 
@@ -377,6 +389,9 @@ def _build_module(package_dir: Path, mapping_key: str, class_name: str) -> types
     input_types = class_meta.get("input_types") or {}
     return_types = class_meta.get("return_types") or []
     output_keys = [o["var_name"] for o in outputs]
+    media_output_keys = frozenset(
+        o["var_name"] for o in outputs if o.get("media") or o["var_name"] in ("image", "mask")
+    )
 
     slug = package_dir.name
     node_type = f"comfyui.{slug}.{mapping_key}"
@@ -400,6 +415,7 @@ def _build_module(package_dir: Path, mapping_key: str, class_name: str) -> types
         mapping_key,
         input_names,
         output_keys,
+        media_output_keys,
         input_types,
         return_types,
     )
