@@ -17,12 +17,19 @@ POST /workflow/execute
     Execute a full workflow graph.
     Body: { uid, token, nodes: [...], edges: [...] }
 """
-
+import json
 import traceback
+import os
+import uuid
+from nodes.diffusion._project_folder import get_project_folder
+from api.log_buffer import log_buffer
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Any
+from nodes.diffusion._pick_image_file import pick_image_file
+from nodes.diffusion.genvr_api import get_available_models, get_model_schema
 
 from comfyui_custom_nodes.comfy_debug import comfy_log
 from comfyui_custom_nodes.workflow_bridge import is_comfy_node_type
@@ -60,6 +67,7 @@ class WorkflowExecuteRequest(BaseModel):
     token: str
     nodes: list[WorkflowNode]
     edges: list[WorkflowEdge] = []
+
 
 
 # ── Node routes ───────────────────────────────────────────────────────────────
@@ -132,3 +140,113 @@ async def execute_workflow_route(body: WorkflowExecuteRequest):
         "node_outputs": result.node_outputs,
         "log": result.log,
     }
+
+@router.get("/local-file", summary="Serve a local file (image/tensor) so the browser can display it")
+def get_local_file(path: str):
+    import os
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    return FileResponse(path)
+
+
+@router.get("/pick-image", summary="Open a native file picker for selecting an image")
+def get_pick_image():
+    path = pick_image_file()
+    return {"path": path}
+
+
+
+@router.get("/genvr-models", summary="Get the list of available GenVR models")
+def get_genvr_models(api_key: str):
+    return {"models": get_available_models(api_key)}
+
+@router.get("/genvr-schema", summary="Get parameter schema for a specific GenVR model")
+def get_genvr_schema(category: str, subcategory: str):
+    return {"schema": get_model_schema(category, subcategory)}
+
+@router.post("/upload-image", summary="Upload an image, save it locally, return its path")
+async def upload_image(file: UploadFile = File(...)):
+    folder = get_project_folder()
+    ext = os.path.splitext(file.filename or "")[1] or ".png"
+    file_path = os.path.join(folder, f"upload_{uuid.uuid4().hex}{ext}")
+
+    contents = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    return {"path": file_path}
+
+WORKFLOWS_DIR_NAME = "saved_workflows"
+
+
+def _workflows_dir() -> str:
+    folder = os.path.join(get_project_folder(), WORKFLOWS_DIR_NAME)
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+class SaveWorkflowRequest(BaseModel):
+    name: str
+    nodes: list[WorkflowNode]
+    edges: list[WorkflowEdge] = []
+    positions: dict[str, dict[str, float]] = {}
+
+
+@router.post("/workflows", summary="Save a workflow to disk")
+def save_workflow(body: SaveWorkflowRequest):
+    safe_name = "".join(c for c in body.name if c.isalnum() or c in (" ", "-", "_")).strip() or "untitled"
+    file_path = os.path.join(_workflows_dir(), f"{safe_name}.json")
+    with open(file_path, "w") as f:
+        json.dump(body.model_dump(), f, indent=2)
+    return {"name": safe_name}
+
+
+@router.get("/workflows", summary="List saved workflows")
+def list_workflows():
+    folder = _workflows_dir()
+    names = [os.path.splitext(f)[0] for f in os.listdir(folder) if f.endswith(".json")]
+    return {"workflows": sorted(names)}
+
+
+@router.get("/workflows/{name}", summary="Load a saved workflow")
+def load_workflow(name: str):
+    file_path = os.path.join(_workflows_dir(), f"{name}.json")
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail=f"Workflow '{name}' not found")
+    with open(file_path) as f:
+        return json.load(f)
+
+
+@router.delete("/workflows/{name}", summary="Delete a saved workflow")
+def delete_workflow(name: str):
+    file_path = os.path.join(_workflows_dir(), f"{name}.json")
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail=f"Workflow '{name}' not found")
+    os.remove(file_path)
+    return {"deleted": name}
+
+@router.get("/assets", summary="List generated image files in the project folder")
+def list_assets():
+    folder = get_project_folder()
+    exts = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+    files = [
+        f for f in os.listdir(folder)
+        if f.lower().endswith(exts) and os.path.isfile(os.path.join(folder, f))
+    ]
+    files.sort(key=lambda f: os.path.getmtime(os.path.join(folder, f)), reverse=True)
+    return {"assets": [{"name": f, "path": os.path.join(folder, f)} for f in files]}
+
+
+@router.get("/logs", summary="Get recent backend log lines")
+def get_logs():
+    return {"logs": list(log_buffer)}
+
+@router.delete("/logs", summary="Clear the backend log buffer")
+def clear_logs():
+    log_buffer.clear()
+    return {"cleared": True}
+
+@router.delete("/logs", summary="Clear the backend log buffer")
+def clear_logs():
+    log_buffer.clear()
+    return {"cleared": True}

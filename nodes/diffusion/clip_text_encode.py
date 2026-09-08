@@ -11,15 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import os
-import tempfile
+import uuid
 import threading
 
 import torch
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
-from nodes.ffmpeg._utils import upload_file
 from nodes.diffusion._model_choices import MODEL_CHOICES
-
+from nodes.diffusion._project_folder import get_project_folder
+from nodes.diffusion._models_folder import require_model_path
 metadata = {
     "display_name": "CLIP Text Encode",
     "description": "Encodes a prompt into SDXL conditioning. Use two of these — one for positive, one for negative.",
@@ -42,7 +42,8 @@ _cache_lock = threading.Lock()
 
 
 def _resolve_repo(model_id: str) -> str:
-    return MODEL_CHOICES.get(model_id, model_id)
+    repo_id = MODEL_CHOICES.get(model_id, model_id)
+    return require_model_path(repo_id)
 
 
 def _get_models(model_id: str):
@@ -86,13 +87,12 @@ def _encode(prompt: str, models: dict):
     return embeds, out_2.text_embeds
 
 
-def _save_and_upload(uid, token, tensor):
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
-    tmp.close()
-    torch.save(tensor.cpu(), tmp.name)
-    url = upload_file(uid, token, tmp.name)
-    os.unlink(tmp.name)
-    return url
+def _save_locally(tensor, name_prefix):
+    folder = get_project_folder()
+    file_name = f"{name_prefix}_{uuid.uuid4().hex}.pt"
+    file_path = os.path.join(folder, file_name)
+    torch.save(tensor.cpu(), file_path)
+    return file_path
 
 
 async def execute(uid: str, token: str, inputs: dict) -> dict:
@@ -102,7 +102,7 @@ async def execute(uid: str, token: str, inputs: dict) -> dict:
     models = await asyncio.to_thread(_get_models, model_id)
     embeds, pooled = await asyncio.to_thread(_encode, prompt, models)
 
-    embeds_url = await asyncio.to_thread(_save_and_upload, uid, token, embeds)
-    pooled_url = await asyncio.to_thread(_save_and_upload, uid, token, pooled)
+    embeds_path = await asyncio.to_thread(_save_locally, embeds, "embeds")
+    pooled_path = await asyncio.to_thread(_save_locally, pooled, "pooled_embeds")
 
-    return {"embeds": embeds_url, "pooled_embeds": pooled_url}
+    return {"embeds": embeds_path, "pooled_embeds": pooled_path}

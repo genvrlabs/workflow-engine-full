@@ -6,15 +6,17 @@ from __future__ import annotations
 
 import asyncio
 import os
-import tempfile
+import uuid
 import threading
+from datetime import datetime
 
 import torch
 from diffusers import AutoencoderKL
 from PIL import Image
 
-from nodes.ffmpeg._utils import download_to_tempfile, upload_file
 from nodes.diffusion._model_choices import MODEL_CHOICES, VAE_CHOICES
+from nodes.diffusion._project_folder import get_project_folder
+from nodes.diffusion._models_folder import require_model_path
 
 _cache: dict = {}
 _lock = threading.Lock()
@@ -34,9 +36,11 @@ def _get_vae(model_id: str, vae_id: str):
         override_repo = VAE_CHOICES.get(vae_id, vae_id if "/" in (vae_id or "") else None)
 
         if override_repo:
+            override_repo = require_model_path(override_repo)
             vae = AutoencoderKL.from_pretrained(override_repo, torch_dtype=dtype).to(device).eval()
         else:
             repo_id = MODEL_CHOICES.get(model_id, model_id)
+            repo_id = require_model_path(repo_id)
             vae = AutoencoderKL.from_pretrained(
                 repo_id, subfolder="vae", torch_dtype=dtype,
             ).to(device).eval()
@@ -69,11 +73,7 @@ async def execute(uid: str, token: str, inputs: dict) -> dict:
     device = models["device"]
     dtype = torch.float32
 
-    latents_path = download_to_tempfile(inputs["latents"], suffix=".pt")
-    try:
-        latents = torch.load(latents_path, map_location=device).to(dtype=dtype)
-    finally:
-        os.unlink(latents_path)
+    latents = torch.load(inputs["latents"], map_location=device).to(dtype=dtype)
 
     scaling_factor = getattr(vae.config, "scaling_factor", 0.13025)
     latents = latents / scaling_factor
@@ -86,10 +86,10 @@ async def execute(uid: str, token: str, inputs: dict) -> dict:
     image_array = (decoded[0] * 255).round().astype("uint8")
     image = Image.fromarray(image_array)
 
-    image_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    image_tmp.close()
-    image.save(image_tmp.name)
-    image_url = upload_file(uid, token, image_tmp.name)
-    os.unlink(image_tmp.name)
+    folder = get_project_folder()
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    image_file_name = f"generated_{timestamp}_{uuid.uuid4().hex[:8]}.png"
+    image_path = os.path.join(folder, image_file_name)
+    image.save(image_path)
 
-    return {"image_url": image_url}
+    return {"image_url": image_path}

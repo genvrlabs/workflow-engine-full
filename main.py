@@ -12,10 +12,16 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
+from api.log_buffer import attach_log_buffer
+
+attach_log_buffer()
+logging.getLogger("uvicorn").info("Log buffer test - startup")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import router
+from nodes.diffusion._startup import run_startup_prompts
 
 app = FastAPI(
     title="GenVR Workflow Engine",
@@ -36,6 +42,11 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+
+@app.on_event("startup")
+async def on_startup():
+    run_startup_prompts()
 
 
 @app.get("/", include_in_schema=False)

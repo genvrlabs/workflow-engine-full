@@ -1,8 +1,5 @@
-venv/
+﻿__pycache__/
+*.pyc
+*.log
+scratch_scripts/
 .venv/
-
-# ComfyUI installer artifacts
-comfyui/installed/*
-!comfyui/installed/.gitkeep
-comfyui/custom_nodes/*
-!comfyui/custom_nodes/.gitkeep

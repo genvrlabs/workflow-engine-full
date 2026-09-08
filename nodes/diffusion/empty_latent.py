@@ -7,10 +7,10 @@ the diffusion process.
 
 from __future__ import annotations
 
-import torch
 import os
-import tempfile
-from nodes.ffmpeg._utils import upload_file
+import uuid
+import torch
+from nodes.diffusion._project_folder import get_project_folder
 
 metadata = {
     "display_name": "Empty Latent Image",
@@ -63,12 +63,9 @@ async def execute(uid: str, token: str, inputs: dict) -> dict:
         dtype=dtype,
     )
 
-    latents_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
-    latents_tmp.close()
-    torch.save(latents.cpu(), latents_tmp.name)
-    latents_url = upload_file(uid, token, latents_tmp.name)
-    os.unlink(latents_tmp.name)
+    folder = get_project_folder()
+    file_name = f"latents_{uuid.uuid4().hex}.pt"
+    file_path = os.path.join(folder, file_name)
+    torch.save(latents.cpu(), file_path)
 
-    return {
-        "latents": latents_url
-    }
+    return {"latents": file_path}

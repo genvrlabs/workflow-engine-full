@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import tempfile
+import uuid
 import threading
 
 import torch
@@ -18,8 +18,9 @@ from diffusers import (
     DPMSolverMultistepScheduler,
 )
 
-from nodes.ffmpeg._utils import download_to_tempfile, upload_file
 from nodes.diffusion._model_choices import MODEL_CHOICES
+from nodes.diffusion._project_folder import get_project_folder
+from nodes.diffusion._models_folder import require_model_path
 
 SAMPLER_CHOICES = {
     "euler": EulerDiscreteScheduler,
@@ -40,6 +41,7 @@ def _get_unet(model_id: str):
         if model_id in _unet_cache:
             return _unet_cache[model_id]
         repo_id = MODEL_CHOICES.get(model_id, model_id)
+        repo_id = require_model_path(repo_id)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = torch.float16 if device == "cuda" else torch.float32
         unet = UNet2DConditionModel.from_pretrained(
@@ -62,6 +64,13 @@ def _build_added_cond_kwargs(pooled_embeds, height, width, device, dtype, batch_
         [[height, width, 0, 0, height, width]], dtype=dtype, device=device,
     ).repeat(batch_size, 1)
     return {"text_embeds": pooled_embeds.to(device=device, dtype=dtype), "time_ids": add_time_ids}
+
+def _save_locally(tensor, name_prefix):
+    folder = get_project_folder()
+    file_name = f"{name_prefix}_{uuid.uuid4().hex}.pt"
+    file_path = os.path.join(folder, file_name)
+    torch.save(tensor.cpu(), file_path)
+    return file_path
 
 
 metadata = {
@@ -101,24 +110,11 @@ async def execute(uid: str, token: str, inputs: dict) -> dict:
     dtype = torch.float16 if device == "cuda" else torch.float32
     scheduler = _build_scheduler(model_id, sampler_name)
 
-    embeds_path = download_to_tempfile(inputs["embeds"], suffix=".pt")
-    pooled_path = download_to_tempfile(inputs["pooled_embeds"], suffix=".pt")
-    neg_embeds_path = download_to_tempfile(inputs["negative_embeds"], suffix=".pt")
-    neg_pooled_path = download_to_tempfile(inputs["negative_pooled_embeds"], suffix=".pt")
-    latents_path = download_to_tempfile(inputs["latents"], suffix=".pt")
-
-    try:
-        embeds = torch.load(embeds_path, map_location=device).to(dtype=dtype)
-        pooled_embeds = torch.load(pooled_path, map_location=device).to(dtype=dtype)
-        neg_embeds = torch.load(neg_embeds_path, map_location=device).to(dtype=dtype)
-        neg_pooled_embeds = torch.load(neg_pooled_path, map_location=device).to(dtype=dtype)
-        latents = torch.load(latents_path, map_location=device).to(dtype=dtype)
-    finally:
-        os.unlink(embeds_path)
-        os.unlink(pooled_path)
-        os.unlink(neg_embeds_path)
-        os.unlink(neg_pooled_path)
-        os.unlink(latents_path)
+    embeds = torch.load(inputs["embeds"], map_location=device).to(dtype=dtype)
+    pooled_embeds = torch.load(inputs["pooled_embeds"], map_location=device).to(dtype=dtype)
+    neg_embeds = torch.load(inputs["negative_embeds"], map_location=device).to(dtype=dtype)
+    neg_pooled_embeds = torch.load(inputs["negative_pooled_embeds"], map_location=device).to(dtype=dtype)
+    latents = torch.load(inputs["latents"], map_location=device).to(dtype=dtype)
 
     batch_size = latents.shape[0]
     height = latents.shape[-2] * 8
@@ -147,10 +143,5 @@ async def execute(uid: str, token: str, inputs: dict) -> dict:
             noise_pred = noise_pred_uncond + cfg_scale * (noise_pred_cond - noise_pred_uncond)
             latents = scheduler.step(noise_pred, t, latents).prev_sample
 
-    latents_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
-    latents_tmp.close()
-    torch.save(latents.cpu(), latents_tmp.name)
-    latents_url = upload_file(uid, token, latents_tmp.name)
-    os.unlink(latents_tmp.name)
-
-    return {"latents": latents_url}
+    latents_path = _save_locally(latents, "latents")
+    return {"latents": latents_path}
