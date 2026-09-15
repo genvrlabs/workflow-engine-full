@@ -42,7 +42,7 @@ inputs = [
 ]
 
 outputs = [
-    {"var_name": "image_url", "display_name": "Image URL", "type": "text"},
+    {"var_name": "image_url", "display_name": "Output", "type": "text"},
 ]
 
 
@@ -77,6 +77,8 @@ def _headers(api_key: str):
 
 
 def _call_api(uid: str, api_key: str, category: str, subcategory: str, params: dict) -> str:
+    outgoing_payload = {"uid": uid, "category": category, "subcategory": subcategory, **params}
+    logging.getLogger(__name__).info(f"GenVR /v2/generate outgoing payload: {outgoing_payload}")
     gen_resp = requests.post(
         f"{API_BASE}/v2/generate",
         headers=_headers(api_key),
@@ -117,7 +119,12 @@ def _call_api(uid: str, api_key: str, category: str, subcategory: str, params: d
     resp_resp.raise_for_status()
     response_data = resp_resp.json()
     logging.getLogger(__name__).info(f"GenVR /v2/response raw payload: {response_data}")
-    return response_data["data"]["output"][0]
+    result_url = response_data["data"]["output"][0]
+    if not str(result_url).startswith("http"):
+        # GenVR put an error message here instead of a real URL -
+        # surface it directly instead of trying to "download" it.
+        raise RuntimeError(f"GenVR could not process this request: {result_url}")
+    return result_url
 
 
 def _download_to_local(url: str) -> str:

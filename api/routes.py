@@ -20,9 +20,12 @@ POST /workflow/execute
 import json
 import traceback
 import os
+import requests
 import uuid
 from nodes.diffusion._project_folder import get_project_folder
 from api.log_buffer import log_buffer
+
+
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
@@ -36,6 +39,7 @@ from comfyui_custom_nodes.workflow_bridge import is_comfy_node_type
 
 from nodes.registry import list_nodes, get_node
 from engine.executor import execute_workflow
+from services.workflow_agent import generate_workflow_text
 from engine.node_runner import run_node
 
 router = APIRouter()
@@ -199,6 +203,26 @@ def save_workflow(body: SaveWorkflowRequest):
     with open(file_path, "w") as f:
         json.dump(body.model_dump(), f, indent=2)
     return {"name": safe_name}
+class GenerateWorkflowRequest(BaseModel):
+    prompt: str
+    uid: str
+    token: str
+    model: str
+
+
+@router.post("/agent/generate-workflow", summary="Generate a workflow from a plain-English request")
+def generate_workflow_route(body: GenerateWorkflowRequest):
+    try:
+        raw_text = generate_workflow_text(body.prompt, body.uid, body.token, body.model)
+    except requests.exceptions.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}")
+
+    try:
+        workflow_json = json.loads(raw_text)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=422, detail=f"LLM did not return valid JSON: {raw_text[:300]}")
+
+    return workflow_json
 
 
 @router.get("/workflows", summary="List saved workflows")
